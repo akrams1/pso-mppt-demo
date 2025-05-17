@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PSO MPPT Animation</title>
+    <!-- Import React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Babel for JSX transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .title {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title text-2xl font-bold">Particle Swarm Optimization (PSO) for Maximum Power Point Tracking</h1>
+        <div id="root"></div>
+    </div>
+
+    <script type="text/babel">
+        // PsoMpptAnimation Component
+        const PsoMpptAnimation = () => {
+            const [frame, setFrame] = React.useState(0);
+            const [isPlaying, setIsPlaying] = React.useState(true);
+            const [speed, setSpeed] = React.useState(1);
+            const totalFrames = 100;
+            
+            // PSO parameters
+            const [particleCount, setParticleCount] = React.useState(5);
+            const [inertia, setInertia] = React.useState(0.7);
+            const [particles, setParticles] = React.useState([]);
+            const [globalBest, setGlobalBest] = React.useState({ position: 0, power: 0 });
+            const [iteration, setIteration] = React.useState(0);
+            
+            // PV curve parameters
+            const curvePoints = 100;
+            const pvCurve = [];
+            
+            // Create PV curve with a single maximum power point
+            for (let i = 0; i < curvePoints; i++) {
+                const x = i / (curvePoints - 1);
+                // Create a curve with a peak around 0.7V
+                const y = Math.sin(Math.PI * x) * (1 - Math.pow(x - 0.7, 2) * 2);
+                pvCurve.push({ x: x, y: Math.max(0, y) });
+            }
+            
+            // Find power at a given point
+            const getPower = (voltage) => {
+                const index = Math.floor(voltage * (curvePoints - 1));
+                const boundedIndex = Math.max(0, Math.min(curvePoints - 1, index));
+                return pvCurve[boundedIndex].y;
+            };
+            
+            // Initialize particles
+            const initializeParticles = (count) => {
+                const initialParticles = [];
+                for (let i = 0; i < count; i++) {
+                    const x = Math.random();
+                    const power = getPower(x);
+                    initialParticles.push({
+                        position: x,
+                        velocity: (Math.random() - 0.5) * 0.1,
+                        personalBest: { position: x, power: power },
+                        power: power,
+                        history: [{ position: x, power: power }]
+                    });
+                }
+                
+                // Find initial global best
+                let bestPower = -Infinity;
+                let bestPosition = 0;
+                initialParticles.forEach(p => {
+                    if (p.power > bestPower) {
+                        bestPower = p.power;
+                        bestPosition = p.position;
+                    }
+                });
+                
+                setParticles(initialParticles);
+                setGlobalBest({ position: bestPosition, power: bestPower });
+            };
+            
+            // Initialize on mount or when particle count changes
+            React.useEffect(() => {
+                initializeParticles(particleCount);
+            }, [particleCount]);
+            
+            // Animation loop
+            React.useEffect(() => {
+                if (!isPlaying) return;
+                
+                const timer = setTimeout(() => {
+                    // Update animation frame
+                    setFrame((prevFrame) => (prevFrame + 1) % totalFrames);
+                    
+                    // Update PSO algorithm every 10 frames
+                    if (frame % 10 === 0 && particles.length > 0) {
+                        updateParticles();
+                    }
+                }, 50 / speed);
+                
+                return () => clearTimeout(timer);
+            }, [frame, isPlaying, speed, particles]);
+            
+            const updateParticles = () => {
+                const w = inertia; // Inertia
+                const c1 = 1.5; // Cognitive coefficient
+                const c2 = 1.5; // Social coefficient
+                
+                const updatedParticles = particles.map(particle => {
+                    // PSO velocity update
+                    const r1 = Math.random();
+                    const r2 = Math.random();
+                    
+                    let newVelocity = w * particle.velocity + 
+                                    c1 * r1 * (particle.personalBest.position - particle.position) +
+                                    c2 * r2 * (globalBest.position - particle.position);
+                    
+                    // Limit velocity
+                    newVelocity = Math.max(-0.1, Math.min(0.1, newVelocity));
+                    
+                    // Position update
+                    let newPosition = particle.position + newVelocity;
+                    newPosition = Math.max(0, Math.min(1, newPosition));
+                    
+                    // Evaluate fitness
+                    const newPower = getPower(newPosition);
+                    
+                    // Update personal best
+                    let newPersonalBest = particle.personalBest;
+                    if (newPower > particle.personalBest.power) {
+                        newPersonalBest = { position: newPosition, power: newPower };
+                    }
+                    
+                    // Save history for trailing animation
+                    const newHistory = [...particle.history, { position: newPosition, power: newPower }];
+                    if (newHistory.length > 10) {
+                        newHistory.shift();
+                    }
+                    
+                    return {
+                        position: newPosition,
+                        velocity: newVelocity,
+                        personalBest: newPersonalBest,
+                        power: newPower,
+                        history: newHistory
+                    };
+                });
+                
+                // Update global best
+                let newGlobalBest = globalBest;
+                updatedParticles.forEach(p => {
+                    if (p.personalBest.power > globalBest.power) {
+                        newGlobalBest = { position: p.personalBest.position, power: p.personalBest.power };
+                    }
+                });
+                
+                setParticles(updatedParticles);
+                setGlobalBest(newGlobalBest);
+                setIteration(prev => prev + 1);
+            };
+            
+            // SVG dimensions
+            const width = 600;
+            const height = 400;
+            const padding = 40;
+            
+            // Mapping functions for coordinates
+            const xToSvg = (x) => padding + x * (width - 2 * padding);
+            const yToSvg = (y) => height - padding - y * (height - 2 * padding);
+            
+            // Render PV curve
+            const pvCurvePath = pvCurve.map((point, i) => {
+                return `${i === 0 ? 'M' : 'L'} ${xToSvg(point.x)} ${yToSvg(point.y)}`;
+            }).join(' ');
+            
+            // Control functions
+            const togglePlayPause = () => setIsPlaying(!isPlaying);
+            const handleSpeedChange = (e) => setSpeed(parseFloat(e.target.value));
+            const restart = () => {
+                setFrame(0);
+                setIteration(0);
+                initializeParticles(particleCount);
+                setIsPlaying(true);
+            };
+            
+            return (
+                <div className="flex flex-col items-center p-4 bg-gray-50 rounded-lg">
+                    <h2 className="text-xl font-bold mb-2">Particle Swarm Optimization (PSO) for MPPT</h2>
+                    <p className="mb-4 text-gray-700">Visualizing how particles search for the Maximum Power Point</p>
+                    
+                    <div className="relative mb-4">
+                        <svg width={width} height={height} className="bg-white border border-gray-300 rounded-lg">
+                            {/* Grid lines */}
+                            <g className="grid-lines">
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <line 
+                                        key={`h-grid-${i}`} 
+                                        x1={padding} 
+                                        y1={padding + i * (height - 2 * padding) / 5} 
+                                        x2={width - padding} 
+                                        y2={padding + i * (height - 2 * padding) / 5}
+                                        stroke="#e5e7eb" 
+                                        strokeWidth="1" 
+                                    />
+                                ))}
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <line 
+                                        key={`v-grid-${i}`} 
+                                        x1={padding + i * (width - 2 * padding) / 5} 
+                                        y1={padding} 
+                                        x2={padding + i * (width - 2 * padding) / 5} 
+                                        y2={height - padding}
+                                        stroke="#e5e7eb" 
+                                        strokeWidth="1" 
+                                    />
+                                ))}
+                            </g>
+                            
+                            {/* Axes */}
+                            <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="black" strokeWidth="2" />
+                            <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="black" strokeWidth="2" />
+                            
+                            {/* Axis labels */}
+                            <text x={width / 2} y={height - 5} textAnchor="middle" fontSize="14">Voltage (V)</text>
+                            <text x={15} y={height / 2} textAnchor="middle" fontSize="14" transform={`rotate(-90 15 ${height / 2})`}>Power (W)</text>
+                            
+                            {/* PV curve */}
+                            <path d={pvCurvePath} fill="none" stroke="#3b82f6" strokeWidth="2" />
+                            
+                            {/* Global Best (now red and labeled MPP) */}
+                            <circle 
+                                cx={xToSvg(globalBest.position)} 
+                                cy={yToSvg(globalBest.power)} 
+                                r="8" 
+                                fill="none" 
+                                stroke="#ef4444" 
+                                strokeWidth="2" 
+                                strokeDasharray="5,2"
+                            />
+                            <circle 
+                                cx={xToSvg(globalBest.position)} 
+                                cy={yToSvg(globalBest.power)} 
+                                r="4" 
+                                fill="#ef4444"
+                            />
+                            <text 
+                                x={xToSvg(globalBest.position)} 
+                                y={yToSvg(globalBest.power) - 10} 
+                                textAnchor="middle" 
+                                fontSize="12" 
+                                fill="#ef4444" 
+                                fontWeight="bold"
+                            >
+                                MPP
+                            </text>
+                            
+                            {/* Particles */}
+                            {particles.map((particle, idx) => (
+                                <g key={`particle-${idx}`} className="particle">
+                                    {/* Particle history trail */}
+                                    {particle.history.map((point, hIdx) => (
+                                        <circle 
+                                            key={`history-${idx}-${hIdx}`}
+                                            cx={xToSvg(point.position)} 
+                                            cy={yToSvg(point.power)} 
+                                            r={2 + hIdx * 0.3} 
+                                            fill={`rgba(${idx * 50}, 100, ${255 - idx * 40}, ${hIdx / particle.history.length})`}
+                                        />
+                                    ))}
+                                    
+                                    {/* Current particle */}
+                                    <circle 
+                                        cx={xToSvg(particle.position)} 
+                                        cy={yToSvg(particle.power)} 
+                                        r="5" 
+                                        fill={`rgb(${idx * 50}, 100, ${255 - idx * 40})`}
+                                    />
+                                    
+                                    {/* Personal best */}
+                                    <circle 
+                                        cx={xToSvg(particle.personalBest.position)} 
+                                        cy={yToSvg(particle.personalBest.power)} 
+                                        r="3" 
+                                        fill="none"
+                                        stroke={`rgb(${idx * 50}, 100, ${255 - idx * 40})`}
+                                        strokeWidth="2"
+                                    />
+                                </g>
+                            ))}
+                            
+                            {/* Information text */}
+                            <text x={padding + 10} y={padding + 20} fontSize="12" fill="#1f2937">
+                                Iteration: {iteration}
+                            </text>
+                            <text x={padding + 10} y={padding + 40} fontSize="12" fill="#ef4444">
+                                MPP: V = {globalBest.position.toFixed(3)}, P = {globalBest.power.toFixed(3)}
+                            </text>
+                        </svg>
+                    </div>
+                    
+                    <div className="flex space-x-4 items-center mb-4">
+                        <button 
+                            onClick={togglePlayPause} 
+                            className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                            {isPlaying ? 'Pause' : 'Play'}
+                        </button>
+                        <button 
+                            onClick={restart} 
+                            className="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-blue-600"
+                        >
+                            Restart
+                        </button>
+                        <div className="flex items-center">
+                            <span className="mr-2">Speed:</span>
+                            <input 
+                                type="range" 
+                                min="0.5" 
+                                max="3" 
+                                step="0.5" 
+                                value={speed} 
+                                onChange={handleSpeedChange} 
+                                className="w-24"
+                            />
+                            <span className="ml-2">{speed}x</span>
+                        </div>
+                    </div>
+                    
+                    <div className="flex space-x-6 items-center mb-4">
+                        <div className="flex items-center">
+                            <span className="mr-2">Particles:</span>
+                            <input 
+                                type="range" 
+                                min="3" 
+                                max="20" 
+                                step="1" 
+                                value={particleCount} 
+                                onChange={(e) => setParticleCount(parseInt(e.target.value))}
+                                className="w-24"
+                            />
+                            <span className="ml-2">{particleCount}</span>
+                        </div>
+                        <div className="flex items-center">
+                            <span className="mr-2">Inertia:</span>
+                            <input 
+                                type="range" 
+                                min="0.1" 
+                                max="1.0" 
+                                step="0.1" 
+                                value={inertia} 
+                                onChange={(e) => setInertia(parseFloat(e.target.value))}
+                                className="w-24"
+                            />
+                            <span className="ml-2">{inertia.toFixed(1)}</span>
+                        </div>
+                    </div>
+                    
+                    <div className="mt-2 text-sm text-gray-600 max-w-lg">
+                        <h3 className="font-bold mb-1">How PSO MPPT Works:</h3>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li>Each colored circle represents a "particle" searching for the maximum power point</li>
+                            <li>Particles move based on: 
+                                <ol className="list-decimal pl-5 mt-1">
+                                    <li>Their own best position (cognitive component)</li>
+                                    <li>The swarm's best position (social component)</li>
+                                    <li>Current momentum (inertia component)</li>
+                                </ol>
+                            </li>
+                            <li>The red circle shows the Maximum Power Point (MPP) found so far</li>
+                            <li>Particles converge toward the optimal operating voltage to extract maximum power</li>
+                            <li>Adjust the number of particles and inertia to see how they affect convergence</li>
+                        </ul>
+                    </div>
+                </div>
+            );
+        };
+
+        // Render the component
+        ReactDOM.render(<PsoMpptAnimation />, document.getElementById('root'));
+    </script>
+</body>
+</html>
